@@ -17,11 +17,11 @@ FanPredix is a decentralized, peer-to-peer prediction market platform designed s
 ### Admin
 - Deploy the FanPredix contract
 - Manage contract configuration (e.g., platform fees, minimum bet amounts)
-- Grant and revoke TEAM_ROLE to official team addresses
+- Add official team addresses with TEAM_ROLE
 
 ### Team Manager (TEAM_ROLE)
 - Create official prediction markets for their events
-- Specify the Fan Token to be used for each market
+- Update team information (name, Fan Token address, active status)
 - Resolve markets by proposing the final outcome
 
 ### Users (Fans)
@@ -33,10 +33,11 @@ FanPredix is a decentralized, peer-to-peer prediction market platform designed s
 
 Fan Tokens are at the core of FanPredix's functionality:
 
-1. Market Creation: Team managers specify which Fan Token will be used for their markets.
-2. Betting: Users place bets using the specified Fan Token for each market.
-3. Winnings: Profits are paid out in Fan Tokens.
-4. Future Feature: Governance voting for dispute resolution using Fan Tokens.
+1. Team Registration: Each team is associated with its specific Fan Token.
+2. Market Creation: Team managers create markets using their team's Fan Token.
+3. Betting: Users place bets using the specified Fan Token for each market.
+4. Winnings: Profits are paid out in Fan Tokens.
+5. Future Feature: Governance voting for dispute resolution using Fan Tokens.
 
 ## User Flow
 
@@ -47,35 +48,38 @@ Fan Tokens are at the core of FanPredix's functionality:
 5. Monitor: Track the progress of the event and the market.
 6. Redeem Winnings: If successful, claim winnings after market resolution, minus the platform fee.
 
-## Team Manager Flow for Market Creation
+## Team Manager Flow
 
-1. Obtain TEAM_ROLE: Team addresses must be granted TEAM_ROLE by the admin.
-2. Create Market:
-   - Specify the Fan Token to be used
+1. Team Registration: Admin adds the team manager address with TEAM_ROLE.
+2. Update Team Info: Team manager can update team name, Fan Token address, and active status.
+3. Create Market:
    - Set event details: category, question, description, options
    - Define start and end times
-3. Monitor Market: Observe user participation.
-4. Resolve Market: After the event concludes, propose the final outcome.
+4. Monitor Market: Observe user participation.
+5. Resolve Market: After the event concludes, propose the final outcome.
 
 ## Technical Implementation
 
 ### Smart Contract Structure
 
-The main contract handles all core functionalities:
+The project is divided into multiple contracts for better organization and maintainability:
 
-1. Market Management: Creation and resolution of markets
-2. Order Placement and Matching: P2P order matching system
-3. Bet Settlement: Calculation and distribution of winnings
-4. Fee Collection: Automatic deduction of platform fees from winnings
+1. FanPredixStructs.sol: Contains all structs and enums.
+2. FanPredixStorage.sol: Defines state variables, mappings, and roles.
+3. FanPredixEvents.sol: Declares all events used in the project.
+4. FanPredixCore.sol: Implements main functionality (team management, market creation, order placement, etc.).
+5. FanPredixHelper.sol: Contains helper functions.
+6. FanPredixQuery.sol: Implements view functions for querying data.
+7. FanPredix.sol: The main contract that inherits from all others.
 
 ### Key Functions
 
-- grantTeamRole: Grant TEAM_ROLE to an address (admin only)
-- revokeTeamRole: Revoke TEAM_ROLE from an address (admin only)
+- addTeam: Add a new team with TEAM_ROLE (admin only)
+- updateTeam: Update team information (team manager only)
 - createMarket: Create a new prediction market (TEAM_ROLE only)
 - placeOrder: Place a back or lay order on a specific outcome
 - cancelOrder: Cancel an existing unmatched order
-- matchOrders: Internal function to match compatible orders
+- _tryMatchOrder: Internal function to match compatible orders
 - resolveMarket: Propose the final outcome of a market (TEAM_ROLE only)
 - redeemWinnings: Claim winnings for successful bets
 
