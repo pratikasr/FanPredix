@@ -1,13 +1,10 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("FanPredixCore", function () {
-  let FanPredixCore, fanPredixCore, owner, admin, teamManager, user1, user2, treasury;
-  let MockToken, mockToken;
-
+describe("FanPredix", function () {
+  let FanPredix, fanPredix, MockToken, mockToken;
+  let owner, admin, teamManager, user1, user2, treasury;
   const PLATFORM_FEE = 250; // 2.5%
-  const MIN_BET_AMOUNT = ethers.utils.parseEther("10");
-  const ODDS_BASE = 1000;
 
   beforeEach(async function () {
     [owner, admin, teamManager, user1, user2, treasury] = await ethers.getSigners();
@@ -17,118 +14,180 @@ describe("FanPredixCore", function () {
     mockToken = await MockToken.deploy("Fan Token", "FAN");
     await mockToken.deployed();
 
-    // Deploy FanPredixCore
-    FanPredixCore = await ethers.getContractFactory("FanPredixCore");
-    fanPredixCore = await FanPredixCore.deploy(PLATFORM_FEE, MIN_BET_AMOUNT, treasury.address);
-    await fanPredixCore.deployed();
+    // Deploy FanPredix
+    FanPredix = await ethers.getContractFactory("FanPredix");
+    fanPredix = await FanPredix.deploy(PLATFORM_FEE, treasury.address);
+    await fanPredix.deployed();
 
     // Grant admin role
-    await fanPredixCore.grantRole(await fanPredixCore.ADMIN_ROLE(), admin.address);
+    await fanPredix.grantRole(await fanPredix.ADMIN_ROLE(), admin.address);
 
     // Add team
-    await fanPredixCore.connect(admin).addTeam(teamManager.address, "Test Team", mockToken.address);
+    await fanPredix.connect(admin).addTeam("Test Team", teamManager.address, mockToken.address);
 
     // Mint tokens for users
     await mockToken.mint(user1.address, ethers.utils.parseEther("1000"));
     await mockToken.mint(user2.address, ethers.utils.parseEther("1000"));
 
-    // Approve tokens for FanPredixCore
-    await mockToken.connect(user1).approve(fanPredixCore.address, ethers.constants.MaxUint256);
-    await mockToken.connect(user2).approve(fanPredixCore.address, ethers.constants.MaxUint256);
+    // Approve tokens for FanPredix
+    await mockToken.connect(user1).approve(fanPredix.address, ethers.constants.MaxUint256);
+    await mockToken.connect(user2).approve(fanPredix.address, ethers.constants.MaxUint256);
   });
 
-  it("Should create a market", async function () {
-    const startTime = Math.floor(Date.now() / 1000) + 60; // 1 minute from now
-    const endTime = startTime + 3600; // 1 hour after start
+  describe("Team Management", function () {
+    it("Should add a team", async function () {
+      const team = await fanPredix.getTeam(teamManager.address);
+      expect(team.name).to.equal("Test Team");
+      expect(team.teamManager).to.equal(teamManager.address);
+      expect(team.fanToken).to.equal(mockToken.address);
+    });
 
-    await expect(fanPredixCore.connect(teamManager).createMarket(
-      "Sports",
-      "Who will win?",
-      "Team A vs Team B",
-      ["Team A", "Team B"],
-      startTime,
-      endTime
-    )).to.emit(fanPredixCore, "MarketCreated");
+    it("Should update a team", async function () {
+      await fanPredix.connect(teamManager).updateTeam("Updated Team", mockToken.address);
+      const team = await fanPredix.getTeam(teamManager.address);
+      expect(team.name).to.equal("Updated Team");
+    });
   });
 
-  it("Should place orders and match them", async function () {
-    const startTime = Math.floor(Date.now() / 1000) + 60; // 1 minute from now
-    const endTime = startTime + 3600; // 1 hour after start
+  describe("Market Creation and Management", function () {
+    it("Should create a market", async function () {
+      const startTime = Math.floor(Date.now() / 1000) + 60;
+      const endTime = startTime + 3600;
 
-    await fanPredixCore.connect(teamManager).createMarket(
-      "Sports",
-      "Who will win?",
-      "Team A vs Team B",
-      ["Team A", "Team B"],
-      startTime,
-      endTime
-    );
+      await fanPredix.connect(teamManager).createMarket(
+        "Sports",
+        "Who will win?",
+        "Team A vs Team B",
+        ["Team A", "Team B"],
+        startTime,
+        endTime
+      );
 
-    // Advance time to after market start
-    await ethers.provider.send("evm_increaseTime", [61]);
-    await ethers.provider.send("evm_mine");
+      const market = await fanPredix.getMarket(1);
+      expect(market.teamManager).to.equal(teamManager.address);
+      expect(market.question).to.equal("Who will win?");
+    });
 
-    // Place back order
-    await expect(fanPredixCore.connect(user1).placeOrder(
-      0, // marketId
-      0, // outcomeIndex
-      0, // OrderType.Back
-      ethers.utils.parseEther("100"),
-      1200 // 1.2 odds (1200 / ODDS_BASE)
-    )).to.emit(fanPredixCore, "OrderPlaced");
+    it("Should place orders and match them", async function () {
+      const startTime = Math.floor(Date.now() / 1000) + 60;
+      const endTime = startTime + 3600;
 
-    // Place lay order
-    await expect(fanPredixCore.connect(user2).placeOrder(
-      0, // marketId
-      0, // outcomeIndex
-      1, // OrderType.Lay
-      ethers.utils.parseEther("100"),
-      1200 // 1.2 odds (1200 / ODDS_BASE)
-    )).to.emit(fanPredixCore, "OrdersMatched");
+      await fanPredix.connect(teamManager).createMarket(
+        "Sports",
+        "Who will win?",
+        "Team A vs Team B",
+        ["Team A", "Team B"],
+        startTime,
+        endTime
+      );
+
+      // Advance time to after market start
+      await ethers.provider.send("evm_increaseTime", [61]);
+      await ethers.provider.send("evm_mine");
+
+      // Place back order
+      await fanPredix.connect(user1).placeOrder(1, 0, 0, ethers.utils.parseEther("100"), 1200);
+
+      // Place lay order
+      await fanPredix.connect(user2).placeOrder(1, 0, 1, ethers.utils.parseEther("100"), 1200);
+
+      const backOrders = await fanPredix.getMarketOrders(1, 0, 0);
+      const layOrders = await fanPredix.getMarketOrders(1, 0, 1);
+
+      expect(backOrders.length).to.equal(1);
+      expect(layOrders.length).to.equal(1);
+    });
+
+    it("Should resolve market and allow winning redemption", async function () {
+      const startTime = Math.floor(Date.now() / 1000) + 60;
+      const endTime = startTime + 3600;
+
+      await fanPredix.connect(teamManager).createMarket(
+        "Sports",
+        "Who will win?",
+        "Team A vs Team B",
+        ["Team A", "Team B"],
+        startTime,
+        endTime
+      );
+
+      // Advance time to after market start
+      await ethers.provider.send("evm_increaseTime", [61]);
+      await ethers.provider.send("evm_mine");
+
+      // Place matching orders
+      await fanPredix.connect(user1).placeOrder(1, 0, 0, ethers.utils.parseEther("100"), 1200);
+      await fanPredix.connect(user2).placeOrder(1, 0, 1, ethers.utils.parseEther("100"), 1200);
+
+      // Advance time to after market end
+      await ethers.provider.send("evm_increaseTime", [3600]);
+      await ethers.provider.send("evm_mine");
+
+      // Resolve market
+      await fanPredix.connect(teamManager).resolveMarket(1, 0);
+
+      // Redeem winnings
+      const user1BalanceBefore = await mockToken.balanceOf(user1.address);
+      await fanPredix.connect(user1).redeemWinnings(1);
+      const user1BalanceAfter = await mockToken.balanceOf(user1.address);
+
+      expect(user1BalanceAfter).to.be.gt(user1BalanceBefore);
+
+      // Check that user2 can't redeem
+      await expect(fanPredix.connect(user2).redeemWinnings(1)).to.be.revertedWith("revert");
+    });
   });
 
-  it("Should resolve market and allow winning redemption", async function () {
-    const currentTimestamp = (await ethers.provider.getBlock("latest")).timestamp;
-    const startTime = currentTimestamp + 60; // 1 minute from now
-    const endTime = startTime + 3600; // 1 hour after start
+  describe("Order Management", function () {
+    it("Should allow cancelling an unmatched order", async function () {
+      const startTime = Math.floor(Date.now() / 1000) + 60;
+      const endTime = startTime + 3600;
 
-    console.log("Current time:", currentTimestamp);
-    console.log("Start time:", startTime);
-    console.log("End time:", endTime);
+      await fanPredix.connect(teamManager).createMarket(
+        "Sports",
+        "Who will win?",
+        "Team A vs Team B",
+        ["Team A", "Team B"],
+        startTime,
+        endTime
+      );
 
-    await fanPredixCore.connect(teamManager).createMarket(
-      "Sports",
-      "Who will win?",
-      "Team A vs Team B",
-      ["Team A", "Team B"],
-      startTime,
-      endTime
-    );
+      // Advance time to after market start
+      await ethers.provider.send("evm_increaseTime", [61]);
+      await ethers.provider.send("evm_mine");
 
-    // Advance time to after market start
-    await ethers.provider.send("evm_increaseTime", [61]);
-    await ethers.provider.send("evm_mine");
+      // Place order
+      await fanPredix.connect(user1).placeOrder(1, 0, 0, ethers.utils.parseEther("100"), 1200);
 
-    // Place matching orders
-    await fanPredixCore.connect(user1).placeOrder(0, 0, 0, ethers.utils.parseEther("100"), 1200);
-    await fanPredixCore.connect(user2).placeOrder(0, 0, 1, ethers.utils.parseEther("100"), 1200);
+      const balanceBefore = await mockToken.balanceOf(user1.address);
+      
+      // Cancel order
+      await fanPredix.connect(user1).cancelOrder(1);
 
-    // Advance time to after market end
-    await ethers.provider.send("evm_increaseTime", [3600]);
-    await ethers.provider.send("evm_mine");
+      const balanceAfter = await mockToken.balanceOf(user1.address);
 
-    // Resolve market
-    await fanPredixCore.connect(teamManager).resolveMarket(0, 0);
+      expect(balanceAfter).to.equal(balanceBefore.add(ethers.utils.parseEther("100")));
+    });
+  });
 
-    // Check claimable winnings
-    expect(await fanPredixCore.hasClaimableWinnings(user1.address, 0)).to.be.true;
-    expect(await fanPredixCore.hasClaimableWinnings(user2.address, 0)).to.be.false;
+  describe("Access Control", function () {
+    it("Should only allow admin to add teams", async function () {
+      await expect(fanPredix.connect(user1).addTeam("New Team", user2.address, mockToken.address))
+        .to.be.revertedWith("AccessControl:");
+    });
 
-    // Redeem winnings
-    const initialBalance = await mockToken.balanceOf(user1.address);
-    await fanPredixCore.connect(user1).redeemWinnings(0);
-    const finalBalance = await mockToken.balanceOf(user1.address);
+    it("Should only allow team managers to create markets", async function () {
+      const startTime = Math.floor(Date.now() / 1000) + 60;
+      const endTime = startTime + 3600;
 
-    expect(finalBalance.sub(initialBalance)).to.be.above(ethers.utils.parseEther("0"));
+      await expect(fanPredix.connect(user1).createMarket(
+        "Sports",
+        "Who will win?",
+        "Team A vs Team B",
+        ["Team A", "Team B"],
+        startTime,
+        endTime
+      )).to.be.revertedWith("AccessControl:");
+    });
   });
 });
