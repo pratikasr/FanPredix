@@ -34,6 +34,23 @@ describe("FanPredix", function () {
     await mockToken.connect(user2).approve(fanPredix.address, ethers.constants.MaxUint256);
   });
 
+  async function createMarket() {
+    const latestBlock = await ethers.provider.getBlock("latest");
+    const startTime = latestBlock.timestamp + 60; // 1 minute from now
+    const endTime = startTime + 3600; // 1 hour after start
+
+    await fanPredix.connect(teamManager).createMarket(
+      "Sports",
+      "Who will win?",
+      "Team A vs Team B",
+      ["Team A", "Team B"],
+      startTime,
+      endTime
+    );
+
+    return { startTime, endTime };
+  }
+
   describe("Team Management", function () {
     it("Should add a team", async function () {
       const team = await fanPredix.getTeam(teamManager.address);
@@ -51,38 +68,20 @@ describe("FanPredix", function () {
 
   describe("Market Creation and Management", function () {
     it("Should create a market", async function () {
-      const startTime = Math.floor(Date.now() / 1000) + 60;
-      const endTime = startTime + 3600;
-
-      await fanPredix.connect(teamManager).createMarket(
-        "Sports",
-        "Who will win?",
-        "Team A vs Team B",
-        ["Team A", "Team B"],
-        startTime,
-        endTime
-      );
+      const { startTime, endTime } = await createMarket();
 
       const market = await fanPredix.getMarket(1);
       expect(market.teamManager).to.equal(teamManager.address);
       expect(market.question).to.equal("Who will win?");
+      expect(market.startTime).to.equal(startTime);
+      expect(market.endTime).to.equal(endTime);
     });
 
     it("Should place orders and match them", async function () {
-      const startTime = Math.floor(Date.now() / 1000) + 60;
-      const endTime = startTime + 3600;
-
-      await fanPredix.connect(teamManager).createMarket(
-        "Sports",
-        "Who will win?",
-        "Team A vs Team B",
-        ["Team A", "Team B"],
-        startTime,
-        endTime
-      );
+      const { startTime } = await createMarket();
 
       // Advance time to after market start
-      await ethers.provider.send("evm_increaseTime", [61]);
+      await ethers.provider.send("evm_setNextBlockTimestamp", [startTime + 1]);
       await ethers.provider.send("evm_mine");
 
       // Place back order
@@ -99,20 +98,10 @@ describe("FanPredix", function () {
     });
 
     it("Should resolve market and allow winning redemption", async function () {
-      const startTime = Math.floor(Date.now() / 1000) + 60;
-      const endTime = startTime + 3600;
-
-      await fanPredix.connect(teamManager).createMarket(
-        "Sports",
-        "Who will win?",
-        "Team A vs Team B",
-        ["Team A", "Team B"],
-        startTime,
-        endTime
-      );
+      const { startTime, endTime } = await createMarket();
 
       // Advance time to after market start
-      await ethers.provider.send("evm_increaseTime", [61]);
+      await ethers.provider.send("evm_setNextBlockTimestamp", [startTime + 1]);
       await ethers.provider.send("evm_mine");
 
       // Place matching orders
@@ -120,7 +109,7 @@ describe("FanPredix", function () {
       await fanPredix.connect(user2).placeOrder(1, 0, 1, ethers.utils.parseEther("100"), 1200);
 
       // Advance time to after market end
-      await ethers.provider.send("evm_increaseTime", [3600]);
+      await ethers.provider.send("evm_setNextBlockTimestamp", [endTime + 1]);
       await ethers.provider.send("evm_mine");
 
       // Resolve market
@@ -140,20 +129,10 @@ describe("FanPredix", function () {
 
   describe("Order Management", function () {
     it("Should allow cancelling an unmatched order", async function () {
-      const startTime = Math.floor(Date.now() / 1000) + 60;
-      const endTime = startTime + 3600;
-
-      await fanPredix.connect(teamManager).createMarket(
-        "Sports",
-        "Who will win?",
-        "Team A vs Team B",
-        ["Team A", "Team B"],
-        startTime,
-        endTime
-      );
+      const { startTime } = await createMarket();
 
       // Advance time to after market start
-      await ethers.provider.send("evm_increaseTime", [61]);
+      await ethers.provider.send("evm_setNextBlockTimestamp", [startTime + 1]);
       await ethers.provider.send("evm_mine");
 
       // Place order
@@ -177,7 +156,8 @@ describe("FanPredix", function () {
     });
 
     it("Should only allow team managers to create markets", async function () {
-      const startTime = Math.floor(Date.now() / 1000) + 60;
+      const latestBlock = await ethers.provider.getBlock("latest");
+      const startTime = latestBlock.timestamp + 60;
       const endTime = startTime + 3600;
 
       await expect(fanPredix.connect(user1).createMarket(
