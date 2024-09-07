@@ -9,12 +9,29 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 contract FanPredixCore is FanPredixStorage, FanPredixEvents, ReentrancyGuard {
 
     address public treasury;
+    bool public paused;
+    uint256 private constant ODDS_BASE = 1000;
 
     constructor(uint256 _platformFeePercentage, uint256 _minBetAmount, address _treasury) 
         FanPredixStorage(_platformFeePercentage, _minBetAmount) 
     {
         require(_treasury != address(0), "Invalid treasury address");
         treasury = _treasury;
+    }
+
+    modifier whenNotPaused() {
+        require(!paused, "Contract is paused");
+        _;
+    }
+
+    function pause() external onlyRole(ADMIN_ROLE) {
+        paused = true;
+        emit Paused(msg.sender);
+    }
+
+    function unpause() external onlyRole(ADMIN_ROLE) {
+        paused = false;
+        emit Unpaused(msg.sender);
     }
 
     function updateTreasury(address _newTreasury) external onlyRole(ADMIN_ROLE) {
@@ -69,7 +86,7 @@ contract FanPredixCore is FanPredixStorage, FanPredixEvents, ReentrancyGuard {
         string[] memory _options,
         uint256 _startTime,
         uint256 _endTime
-    ) external onlyRole(TEAM_ROLE) {
+    ) external onlyRole(TEAM_ROLE) whenNotPaused {
         require(teams[msg.sender].isActive, "Team is not active");
         require(_startTime > block.timestamp && _endTime > _startTime, "Invalid time range");
 
@@ -97,7 +114,7 @@ contract FanPredixCore is FanPredixStorage, FanPredixEvents, ReentrancyGuard {
         OrderType _orderType,
         uint256 _amount,
         uint256 _odds
-    ) external nonReentrant {
+    ) external nonReentrant whenNotPaused {
         Market storage market = markets[_marketId];
         require(market.status == MarketStatus.Open, "Market is not open");
         require(block.timestamp >= market.startTime && block.timestamp < market.endTime, "Market is not active");
@@ -115,14 +132,14 @@ contract FanPredixCore is FanPredixStorage, FanPredixEvents, ReentrancyGuard {
             isMatched: false
         });
 
-        IERC20(market.fanToken).transferFrom(msg.sender, address(this), _amount);
+        transferFanTokens(market.fanToken, msg.sender, address(this), _amount);
 
         emit OrderPlaced(orderId, _marketId, msg.sender);
 
         _tryMatchOrder(orderId);
     }
 
-    function cancelOrder(uint256 _orderId) external nonReentrant {
+    function cancelOrder(uint256 _orderId) external nonReentrant whenNotPaused {
         Order storage order = orders[_orderId];
         require(order.user == msg.sender, "Not order owner");
         require(!order.isMatched, "Order already matched");
@@ -136,7 +153,7 @@ contract FanPredixCore is FanPredixStorage, FanPredixEvents, ReentrancyGuard {
         emit OrderCancelled(_orderId, order.marketId);
     }
 
-    function resolveMarket(uint256 _marketId, uint256 _resolvedOutcomeIndex) external onlyRole(TEAM_ROLE) {
+    function resolveMarket(uint256 _marketId, uint256 _resolvedOutcomeIndex) external onlyRole(TEAM_ROLE) whenNotPaused {
         Market storage market = markets[_marketId];
         require(market.teamManager == msg.sender, "Not market manager");
         require(market.status == MarketStatus.Open, "Market is not open");
@@ -161,7 +178,7 @@ contract FanPredixCore is FanPredixStorage, FanPredixEvents, ReentrancyGuard {
         }
     }
 
-    function redeemWinnings(uint256 _marketId) external nonReentrant {
+    function redeemWinnings(uint256 _marketId) external nonReentrant whenNotPaused {
         Market storage market = markets[_marketId];
         require(market.status == MarketStatus.Resolved, "Market not resolved");
 
@@ -203,7 +220,6 @@ contract FanPredixCore is FanPredixStorage, FanPredixEvents, ReentrancyGuard {
                     newOrder.isMatched = (newOrder.amount == 0);
                     existingOrder.isMatched = (existingOrder.amount == 0);
                     
-                    // Create bets for both backer and layer
                     _createMatchedBets(newOrder, existingOrder, matchedAmount, market.id);
                     
                     emit OrdersMatched(_orderId, existingOrder.id, matchedAmount);
@@ -223,7 +239,6 @@ contract FanPredixCore is FanPredixStorage, FanPredixEvents, ReentrancyGuard {
         Order storage backOrder = _order1.orderType == OrderType.Back ? _order1 : _order2;
         Order storage layOrder = _order1.orderType == OrderType.Lay ? _order1 : _order2;
 
-        // Use the less favorable odds for the matched bet
         uint256 matchedOdds = backOrder.odds < layOrder.odds ? backOrder.odds : layOrder.odds;
 
         bets[betId1] = Bet({
@@ -258,7 +273,7 @@ contract FanPredixCore is FanPredixStorage, FanPredixEvents, ReentrancyGuard {
             Bet storage bet = bets[i];
             if (bet.marketId == _marketId && bet.user == _user) {
                 if (bet.orderType == OrderType.Back && bet.outcomeIndex == market.resolvedOutcomeIndex) {
-                    totalWinnings += bet.amount + (bet.amount * (bet.odds - 1000) / 1000);
+                    totalWinnings += bet.amount + (bet.amount * (bet.odds - ODDS_BASE) / ODDS_BASE);
                 } else if (bet.orderType == OrderType.Lay && bet.outcomeIndex != market.resolvedOutcomeIndex) {
                     totalWinnings += bet.amount;
                 }
@@ -266,5 +281,25 @@ contract FanPredixCore is FanPredixStorage, FanPredixEvents, ReentrancyGuard {
         }
 
         return totalWinnings;
+    }
+
+    function transferFanTokens(address _token, address _from, address _to, uint256 _amount) internal {
+        require(IERC20(_token).transferFrom(_from, _to, _amount), "Token transfer failed");
+    }
+
+    function hasClaimableWinnings(address _user, uint256 _marketId) public view returns (bool) {
+        Market storage market = markets[_marketId];
+        require(market.status == MarketStatus.Resolved, "Market not resolved");
+
+        for (uint256 i = 0; i < nextBetId; i++) {
+            Bet storage bet = bets[i];
+            if (bet.marketId == _marketId && bet.user == _user) {
+                if ((bet.orderType == OrderType.Back && bet.outcomeIndex == market.resolvedOutcomeIndex) ||
+                    (bet.orderType == OrderType.Lay && bet.outcomeIndex != market.resolvedOutcomeIndex)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 }
