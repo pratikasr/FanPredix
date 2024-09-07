@@ -75,8 +75,6 @@ contract FanPredix is AccessControl {
         treasury = _treasury;
     }
 
-    // Core functions
-
     function addTeam(string memory _name, address _teamManager, address _fanToken) external onlyRole(ADMIN_ROLE) {
         require(teams[_teamManager].teamManager == address(0), "Team already exists");
         teams[_teamManager] = Team(_name, _teamManager, _fanToken);
