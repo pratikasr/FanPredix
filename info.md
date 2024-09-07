@@ -67,3 +67,17 @@ FanPredix deeply integrates Fan Tokens into its core functionality:
 ## Conclusion
 
 FanPredix aligns closely with Chiliz's vision of creating a vibrant, engaged web3 community in the sports and entertainment sector. By leveraging Fan Tokens and the Chiliz Chain's capabilities, our platform enhances the utility of these digital assets while providing an exciting new way for fans to interact with their favorite sports and teams.
+
+graph TD
+    A[Admin] --> B[Add Team]
+    B --> C[Team Manager]
+    C --> D[Create Market]
+    D --> E[Market Open]
+    E --> F[Users Place Orders]
+    F --> G{Orders Match?}
+    G -->|Yes| H[Create Bet]
+    G -->|No| F
+    E --> I[Market Closes]
+    I --> J[Resolve Market]
+    J --> K[Users Redeem Winnings]
+    K --> L[Distribute Tokens and Fees]
