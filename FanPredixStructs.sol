@@ -44,5 +44,6 @@ contract FanPredixStructs {
         uint256 outcomeIndex;
         uint256 amount;
         uint256 odds;
+        OrderType orderType;
     }
 }

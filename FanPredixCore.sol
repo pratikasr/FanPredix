@@ -7,9 +7,21 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract FanPredixCore is FanPredixStorage, FanPredixEvents, ReentrancyGuard {
-    constructor(uint256 _platformFeePercentage, uint256 _minBetAmount) 
+
+    address public treasury;
+
+    constructor(uint256 _platformFeePercentage, uint256 _minBetAmount, address _treasury) 
         FanPredixStorage(_platformFeePercentage, _minBetAmount) 
-    {}
+    {
+        require(_treasury != address(0), "Invalid treasury address");
+        treasury = _treasury;
+    }
+
+    function updateTreasury(address _newTreasury) external onlyRole(ADMIN_ROLE) {
+        require(_newTreasury != address(0), "Invalid treasury address");
+        treasury = _newTreasury;
+        emit TreasuryUpdated(_newTreasury);
+    }
 
     function addTeam(address _teamManager, string memory _name, address _fanToken) external onlyRole(ADMIN_ROLE) {
         require(!hasRole(TEAM_ROLE, _teamManager), "Team already exists");
@@ -18,12 +30,36 @@ contract FanPredixCore is FanPredixStorage, FanPredixEvents, ReentrancyGuard {
         emit TeamAdded(_teamManager, _name, _fanToken);
     }
 
+    function revokeTeamRole(address _teamManager) external onlyRole(ADMIN_ROLE) {
+        require(hasRole(TEAM_ROLE, _teamManager), "Not a team manager");
+        _revokeRole(TEAM_ROLE, _teamManager);
+        delete teams[_teamManager];
+        emit TeamRoleRevoked(_teamManager);
+    }
+
     function updateTeam(string memory _name, address _fanToken, bool _isActive) external onlyRole(TEAM_ROLE) {
         require(teams[msg.sender].teamManager == msg.sender, "Not team manager");
         teams[msg.sender].name = _name;
         teams[msg.sender].fanToken = _fanToken;
         teams[msg.sender].isActive = _isActive;
         emit TeamUpdated(msg.sender, _name, _fanToken, _isActive);
+    }
+
+    function updatePlatformFee(uint256 _newFeePercentage) external onlyRole(ADMIN_ROLE) {
+        platformFeePercentage = _newFeePercentage;
+        emit PlatformFeeUpdated(_newFeePercentage);
+    }
+
+    function updateMinBetAmount(uint256 _newMinBetAmount) external onlyRole(ADMIN_ROLE) {
+        minBetAmount = _newMinBetAmount;
+        emit MinBetAmountUpdated(_newMinBetAmount);
+    }
+
+    function withdrawFees(address _token) external onlyRole(ADMIN_ROLE) {
+        uint256 balance = IERC20(_token).balanceOf(address(this));
+        require(balance > 0, "No fees to withdraw");
+        require(IERC20(_token).transfer(treasury, balance), "Fee withdrawal failed");
+        emit FeesWithdrawn(_token, balance);
     }
 
     function createMarket(
@@ -109,7 +145,20 @@ contract FanPredixCore is FanPredixStorage, FanPredixEvents, ReentrancyGuard {
         market.status = MarketStatus.Resolved;
         market.resolvedOutcomeIndex = _resolvedOutcomeIndex;
 
+        _refundUnmatchedOrders(_marketId);
+
         emit MarketResolved(_marketId, _resolvedOutcomeIndex);
+    }
+
+    function _refundUnmatchedOrders(uint256 _marketId) internal {
+        for (uint256 i = 0; i < nextOrderId; i++) {
+            Order storage order = orders[i];
+            if (order.marketId == _marketId && !order.isMatched && order.amount > 0) {
+                IERC20(markets[_marketId].fanToken).transfer(order.user, order.amount);
+                emit OrderRefunded(order.id, order.amount);
+                order.amount = 0;
+            }
+        }
     }
 
     function redeemWinnings(uint256 _marketId) external nonReentrant {
@@ -138,9 +187,14 @@ contract FanPredixCore is FanPredixStorage, FanPredixEvents, ReentrancyGuard {
                 existingOrder.orderType != newOrder.orderType &&
                 !existingOrder.isMatched) {
                 
-                if ((newOrder.orderType == OrderType.Back && newOrder.odds >= existingOrder.odds) ||
-                    (newOrder.orderType == OrderType.Lay && newOrder.odds <= existingOrder.odds)) {
-                    
+                bool isMatched = false;
+                if (newOrder.orderType == OrderType.Back) {
+                    isMatched = newOrder.odds >= existingOrder.odds;
+                } else {
+                    isMatched = newOrder.odds <= existingOrder.odds;
+                }
+                
+                if (isMatched) {
                     uint256 matchedAmount = (newOrder.amount < existingOrder.amount) ? newOrder.amount : existingOrder.amount;
                     
                     newOrder.amount -= matchedAmount;
@@ -149,16 +203,10 @@ contract FanPredixCore is FanPredixStorage, FanPredixEvents, ReentrancyGuard {
                     newOrder.isMatched = (newOrder.amount == 0);
                     existingOrder.isMatched = (existingOrder.amount == 0);
                     
-                    // Create a new bet
-                    uint256 betId = nextBetId++;
-                    bets[betId] = Bet({
-                        id: betId,
-                        marketId: market.id,
-                        user: (newOrder.orderType == OrderType.Back) ? newOrder.user : existingOrder.user,
-                        outcomeIndex: newOrder.outcomeIndex,
-                        amount: matchedAmount,
-                        odds: existingOrder.odds
-                    });
+                    // Create bets for both backer and layer
+                    _createMatchedBets(newOrder, existingOrder, matchedAmount, market.id);
+                    
+                    emit OrdersMatched(_orderId, existingOrder.id, matchedAmount);
                     
                     if (newOrder.amount == 0) {
                         break;
@@ -168,6 +216,40 @@ contract FanPredixCore is FanPredixStorage, FanPredixEvents, ReentrancyGuard {
         }
     }
 
+    function _createMatchedBets(Order storage _order1, Order storage _order2, uint256 _matchedAmount, uint256 _marketId) internal {
+        uint256 betId1 = nextBetId++;
+        uint256 betId2 = nextBetId++;
+
+        Order storage backOrder = _order1.orderType == OrderType.Back ? _order1 : _order2;
+        Order storage layOrder = _order1.orderType == OrderType.Lay ? _order1 : _order2;
+
+        // Use the less favorable odds for the matched bet
+        uint256 matchedOdds = backOrder.odds < layOrder.odds ? backOrder.odds : layOrder.odds;
+
+        bets[betId1] = Bet({
+            id: betId1,
+            marketId: _marketId,
+            user: backOrder.user,
+            outcomeIndex: backOrder.outcomeIndex,
+            amount: _matchedAmount,
+            odds: matchedOdds,
+            orderType: OrderType.Back
+        });
+
+        bets[betId2] = Bet({
+            id: betId2,
+            marketId: _marketId,
+            user: layOrder.user,
+            outcomeIndex: layOrder.outcomeIndex,
+            amount: _matchedAmount,
+            odds: matchedOdds,
+            orderType: OrderType.Lay
+        });
+
+        emit BetCreated(betId1, _marketId, backOrder.user, _matchedAmount, matchedOdds, OrderType.Back);
+        emit BetCreated(betId2, _marketId, layOrder.user, _matchedAmount, matchedOdds, OrderType.Lay);
+    }
+
     function _calculateWinnings(address _user, uint256 _marketId) internal view returns (uint256) {
         Market storage market = markets[_marketId];
         uint256 totalWinnings = 0;
@@ -175,8 +257,10 @@ contract FanPredixCore is FanPredixStorage, FanPredixEvents, ReentrancyGuard {
         for (uint256 i = 0; i < nextBetId; i++) {
             Bet storage bet = bets[i];
             if (bet.marketId == _marketId && bet.user == _user) {
-                if (bet.outcomeIndex == market.resolvedOutcomeIndex) {
+                if (bet.orderType == OrderType.Back && bet.outcomeIndex == market.resolvedOutcomeIndex) {
                     totalWinnings += bet.amount + (bet.amount * (bet.odds - 1000) / 1000);
+                } else if (bet.orderType == OrderType.Lay && bet.outcomeIndex != market.resolvedOutcomeIndex) {
+                    totalWinnings += bet.amount;
                 }
             }
         }

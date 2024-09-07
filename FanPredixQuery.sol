@@ -59,4 +59,50 @@ contract FanPredixQuery is FanPredixStorage {
 
         return userBets;
     }
+
+    function getAllMarkets() external view returns (Market[] memory) {
+        Market[] memory allMarkets = new Market[](nextMarketId);
+        for (uint256 i = 0; i < nextMarketId; i++) {
+            allMarkets[i] = markets[i];
+        }
+        return allMarkets;
+    }
+
+    function getAllTeams() external view returns (Team[] memory) {
+        uint256 teamCount = 0;
+        for (uint256 i = 0; i < nextMarketId; i++) {
+            if (teams[address(uint160(i))].teamManager != address(0)) {
+                teamCount++;
+            }
+        }
+        Team[] memory allTeams = new Team[](teamCount);
+        uint256 index = 0;
+        for (uint256 i = 0; i < nextMarketId; i++) {
+            if (teams[address(uint160(i))].teamManager != address(0)) {
+                allTeams[index] = teams[address(uint160(i))];
+                index++;
+            }
+        }
+        return allTeams;
+    }
+
+    function getMarketOrders(uint256 _marketId) external view returns (Order[] memory) {
+        uint256 count = 0;
+        for (uint256 i = 0; i < nextOrderId; i++) {
+            if (orders[i].marketId == _marketId) {
+                count++;
+            }
+        }
+
+        Order[] memory marketOrders = new Order[](count);
+        uint256 index = 0;
+        for (uint256 i = 0; i < nextOrderId; i++) {
+            if (orders[i].marketId == _marketId) {
+                marketOrders[index] = orders[i];
+                index++;
+            }
+        }
+
+        return marketOrders;
+    }
 }
