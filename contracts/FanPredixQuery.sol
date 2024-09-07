@@ -3,7 +3,7 @@ pragma solidity ^0.8.0;
 
 import "./FanPredixStorage.sol";
 
-contract FanPredixQuery is FanPredixStorage {
+abstract contract FanPredixQuery is FanPredixStorage {
     function getMarket(uint256 _marketId) external view returns (Market memory) {
         return markets[_marketId];
     }

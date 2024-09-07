@@ -283,7 +283,7 @@ contract FanPredixCore is FanPredixStorage, FanPredixEvents, ReentrancyGuard {
         return totalWinnings;
     }
 
-    function transferFanTokens(address _token, address _from, address _to, uint256 _amount) internal {
+    function transferFanTokens(address _token, address _from, address _to, uint256 _amount) internal virtual {
         require(IERC20(_token).transferFrom(_from, _to, _amount), "Token transfer failed");
     }
 
