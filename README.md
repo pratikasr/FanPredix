@@ -60,18 +60,6 @@ Fan Tokens are at the core of FanPredix's functionality:
 
 ## Technical Implementation
 
-### Smart Contract Structure
-
-The project is divided into multiple contracts for better organization and maintainability:
-
-1. FanPredixStructs.sol: Contains all structs and enums.
-2. FanPredixStorage.sol: Defines state variables, mappings, and roles.
-3. FanPredixEvents.sol: Declares all events used in the project.
-4. FanPredixCore.sol: Implements main functionality (team management, market creation, order placement, etc.).
-5. FanPredixHelper.sol: Contains helper functions.
-6. FanPredixQuery.sol: Implements view functions for querying data.
-7. FanPredix.sol: The main contract that inherits from all others.
-
 ### Key Functions
 
 - addTeam: Add a new team with TEAM_ROLE (admin only)
