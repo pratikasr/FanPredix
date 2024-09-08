@@ -16,6 +16,7 @@ contract FanPredix is AccessControl {
     enum MarketStatus { Open, Closed, Resolved }
 
     struct Team {
+        uint256 id;
         string name;
         address teamManager;
         address fanToken;
@@ -23,6 +24,7 @@ contract FanPredix is AccessControl {
 
     struct Market {
         uint256 id;
+        uint256 teamId;
         address teamManager;
         address fanToken;
         string category;
@@ -56,17 +58,20 @@ contract FanPredix is AccessControl {
         OrderType orderType;
     }
 
-    mapping(address => Team) public teams;
+    mapping(uint256 => Team) public teams;
+    mapping(address => uint256) public teamManagerToTeamId;
     mapping(uint256 => Market) public markets;
     mapping(uint256 => Order) public orders;
     mapping(uint256 => Bet) public bets;
 
+    uint256 public teamCounter;
     uint256 public marketCounter;
     uint256 public orderCounter;
     uint256 public betCounter;
 
     mapping(uint256 => mapping(uint256 => mapping(OrderType => Order[]))) public marketOrders;
     mapping(uint256 => mapping(address => uint256[])) public userBets;
+    mapping(uint256 => uint256[]) public teamMarkets;
 
     constructor(uint256 _platformFeePercentage, address _treasury) {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
@@ -76,15 +81,18 @@ contract FanPredix is AccessControl {
     }
 
     function addTeam(string memory _name, address _teamManager, address _fanToken) external onlyRole(ADMIN_ROLE) {
-        require(teams[_teamManager].teamManager == address(0), "Team already exists");
-        teams[_teamManager] = Team(_name, _teamManager, _fanToken);
+        require(teamManagerToTeamId[_teamManager] == 0, "Team already exists");
+        teamCounter++;
+        teams[teamCounter] = Team(teamCounter, _name, _teamManager, _fanToken);
+        teamManagerToTeamId[_teamManager] = teamCounter;
         _grantRole(TEAM_ROLE, _teamManager);
     }
 
     function updateTeam(string memory _name, address _fanToken) external onlyRole(TEAM_ROLE) {
-        require(teams[msg.sender].teamManager != address(0), "Team does not exist");
-        teams[msg.sender].name = _name;
-        teams[msg.sender].fanToken = _fanToken;
+        uint256 teamId = teamManagerToTeamId[msg.sender];
+        require(teamId != 0, "Team does not exist");
+        teams[teamId].name = _name;
+        teams[teamId].fanToken = _fanToken;
     }
 
     function createMarket(
@@ -96,12 +104,15 @@ contract FanPredix is AccessControl {
         uint256 _endTime
     ) external onlyRole(TEAM_ROLE) returns (uint256) {
         require(_startTime > block.timestamp && _endTime > _startTime, "Invalid times");
+        uint256 teamId = teamManagerToTeamId[msg.sender];
+        require(teamId != 0, "Team does not exist");
 
         marketCounter++;
         markets[marketCounter] = Market({
             id: marketCounter,
+            teamId: teamId,
             teamManager: msg.sender,
-            fanToken: teams[msg.sender].fanToken,
+            fanToken: teams[teamId].fanToken,
             category: _category,
             question: _question,
             description: _description,
@@ -112,6 +123,7 @@ contract FanPredix is AccessControl {
             resolvedOutcomeIndex: 0
         });
 
+        teamMarkets[teamId].push(marketCounter);
         return marketCounter;
     }
 
@@ -250,8 +262,8 @@ contract FanPredix is AccessControl {
 
     // Query functions
 
-    function getTeam(address _teamManager) external view returns (Team memory) {
-        return teams[_teamManager];
+    function getTeam(uint256 _teamId) external view returns (Team memory) {
+        return teams[_teamId];
     }
 
     function getMarket(uint256 _marketId) external view returns (Market memory) {
@@ -272,5 +284,17 @@ contract FanPredix is AccessControl {
 
     function getUserBets(uint256 _marketId, address _user) external view returns (uint256[] memory) {
         return userBets[_marketId][_user];
+    }
+
+    function getMarketsByTeam(uint256 _teamId) external view returns (uint256[] memory) {
+        return teamMarkets[_teamId];
+    }
+
+    function getAllTeams() external view returns (Team[] memory) {
+        Team[] memory allTeams = new Team[](teamCounter);
+        for (uint256 i = 1; i <= teamCounter; i++) {
+            allTeams[i - 1] = teams[i];
+        }
+        return allTeams;
     }
 }

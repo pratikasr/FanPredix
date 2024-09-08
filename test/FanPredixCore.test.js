@@ -53,7 +53,8 @@ describe("FanPredix", function () {
 
   describe("Team Management", function () {
     it("Should add a team", async function () {
-      const team = await fanPredix.getTeam(teamManager.address);
+      const teamId = await fanPredix.teamManagerToTeamId(teamManager.address);
+      const team = await fanPredix.getTeam(teamId);
       expect(team.name).to.equal("Test Team");
       expect(team.teamManager).to.equal(teamManager.address);
       expect(team.fanToken).to.equal(mockToken.address);
@@ -61,8 +62,17 @@ describe("FanPredix", function () {
 
     it("Should update a team", async function () {
       await fanPredix.connect(teamManager).updateTeam("Updated Team", mockToken.address);
-      const team = await fanPredix.getTeam(teamManager.address);
+      const teamId = await fanPredix.teamManagerToTeamId(teamManager.address);
+      const team = await fanPredix.getTeam(teamId);
       expect(team.name).to.equal("Updated Team");
+    });
+
+    it("Should get all teams", async function () {
+      await fanPredix.connect(admin).addTeam("Second Team", user1.address, mockToken.address);
+      const allTeams = await fanPredix.getAllTeams();
+      expect(allTeams.length).to.equal(2);
+      expect(allTeams[0].name).to.equal("Test Team");
+      expect(allTeams[1].name).to.equal("Second Team");
     });
   });
 
@@ -75,6 +85,16 @@ describe("FanPredix", function () {
       expect(market.question).to.equal("Who will win?");
       expect(market.startTime).to.equal(startTime);
       expect(market.endTime).to.equal(endTime);
+    });
+
+    it("Should get markets by team", async function () {
+      await createMarket();
+      await createMarket();
+      const teamId = await fanPredix.teamManagerToTeamId(teamManager.address);
+      const teamMarkets = await fanPredix.getMarketsByTeam(teamId);
+      expect(teamMarkets.length).to.equal(2);
+      expect(teamMarkets[0]).to.equal(1);
+      expect(teamMarkets[1]).to.equal(2);
     });
 
     it("Should place orders and match them", async function () {
